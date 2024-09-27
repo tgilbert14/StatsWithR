@@ -1,0 +1,115 @@
+---
+title: 'HW2: Continuous, fixed spatial index'
+author: "STAT 574E: Environmental Statistics"
+date: "**DUE: 10/4 11:59pm**"
+output:
+  pdf_document
+header-includes:
+- \renewcommand*\familydefault{\sfdefault} %% this picks a sans serif font
+- \usepackage[T1]{fontenc}
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8)
+```
+
+## I. Tucson Water
+
+The Arizona Department Of Environmental Quality (ADEQ) monitors ground water for a large number of potentially hazardous chemicals at sites around the state. One such chemical is [**1,4-Dioxane**](https://en.wikipedia.org/wiki/1%2C4-Dioxane), which has a number of industrial uses, but is also irritating to eyes and respiratory systems, and is a possible carcinogen. The data in `1_4_dioxane.csv` were gathered from [**https://www.waterqualitydata.us/**](https://www.waterqualitydata.us/) and represent concentrations of the chemical 1,4-Dioxane in ground water near Tucson as measured in micrograms per liter (`ResultMeasureValue`). Each measurement is associated with a date (`AnalysisStartDate`) and the coordinates of the monitoring site (`Longitude`/`LatitudeMeasure`). In addition, a binary variable indicating whether or not the monitoring site is located within the boundary of Tucson International Airport (TIA) is also included (`airport`). 
+
+(@) [3 pts] Create a map like the one shown to visualize the spatial arrangement of log-dioxane concentrations. Be sure to choose colors appropriate for the measured variable.
+
+```{r, data.view, echo=F, warning=F}
+
+# library to read and manipulate data
+library(tidyverse)
+library(ggplot2)
+library(ggmap)
+library(sf)
+# read in data
+log.dioxane.data <- read_csv("1_4_dioxane.csv")
+#View(log.dioxane.data)
+
+## Data manipulation ----
+
+# checking class (Date)
+class(log.dioxane.data$AnalysisStartDate)
+
+# setting date format? - there are only dates (no times) so I don't think we need this...
+# log.dioxane.data$AnalysisStartDate <- 
+#   strptime(log.dioxane.data$AnalysisStartDate, format = "%Y-%m-%d", tz = "America/Phoenix")
+# # checking date class again after conversion (POSIXlt)
+# class(log.dioxane.data$AnalysisStartDate)
+
+## Need to set coordinate system?
+
+## zone 12 lat/long
+dioxane_sf <- st_as_sf(log.dioxane.data, coords = c("LongitudeMeasure","LatitudeMeasure"), crs = 26912)
+#View(dioxane_sf)
+st_crs(dioxane_sf)
+
+
+
+# .Rds files to run
+#load("C:/Users/tsgil/OneDrive/Documents/VGS/StatsWithR/token.Rds")
+#ggmap::register_stadiamaps(paste0(Token), write=T)
+
+bbox <- c(left = -111.0, bottom = 32.085, right = -110.93, top = 32.175)
+#log.dioxane.data$MonitoringLocationIdentifier
+the.map <- get_stadiamap(bbox = bbox, zoom = 14, scale = 2)
+
+
+# ggmap(the.map) + 
+#   geom_point(aes(x = LongitudeMeasure, y = LatitudeMeasure),
+#              data = data.frame(log.dioxane.data))
+
+ggmap(the.map) +
+  geom_point(aes(x = longitude_decimal, y = latitude_decimal, color = log(ResultMeasureValue)),
+             data = data.frame(dioxane_sf)) +
+  scale_color_gradient(low = "yellow", high = "red")+
+  
+  # Customize latitude labels
+  scale_y_continuous(labels = scales::number_format(accuracy = 0.01))
+
+
+# # create the breaks- and label vectors
+# ewbrks <- seq(-10,10,5)
+# nsbrks <- seq(-10,10,5)
+# ewlbls <- unlist(lapply(ewbrks, function(x) ifelse(x < 0, paste(x, "°E"), ifelse(x > 0, paste(x, "°W"),x))))
+# nslbls <- unlist(lapply(nsbrks, function(x) ifelse(x < 0, paste(x, "°S"), ifelse(x > 0, paste(x, "°N"),x))))
+# 
+# # create the map
+# ggmap(m) +
+#   geom_blank() +
+#   scale_x_continuous(breaks = ewbrks, labels = ewlbls, expand = c(0, 0)) +
+#   scale_y_continuous(breaks = nsbrks, labels = nslbls, expand = c(0, 0)) +
+#   theme(axis.text = element_text(size=12))
+
+
+## end of Data manipulation ----
+```
+
+(@) [4 pts] Make a scatterplot showing log-dioxane as a function of the date each measurement was taken. Does your plot suggest time is related to concentrations of dioxane? Make a figure with two boxplots of log-dioxane grouped by whether or not sites are located at the airport or not. Does your figure suggest that sites at the airport have meaningfully different concentrations than other sites?
+
+(@) [3 pts] Transform the dioxane data so that their new projection (coordinate reference system) corresponds to UTM zone 12N. **(PEC)**. Make an empirical semivariogram for the log-concentration of dioxane after accounting for possible linear effects of date and whether a site is at the airport or not. Give a rough estimate for the size of the nugget effect.
+
+(@) [3 pts] Fit a spatial linear regression model using restricted maximum likelihood (REML) to log-concentrations of dioxane as a linear function of measurement date and whether a site is located at TIA. Use the Matérn parametric family of covariance functions. Report the estimated nugget, partial sill, and range parameters. Given your semivariogram from the previous problem, do the parameter estimates make sense to you?
+
+(@) [3 pts] Fit the same spatial linear regression model to the observations using the two-stage semivariogram + weighted least squares (SV-WLS) approach. Report the estimated covariance function parameters. Which estimation method, REML or SV-WLS, do you think yields the most reasonable covariance function parameters?
+
+(@) [3 pts] Use leave-one-out cross validation to compare the predictive performance of each fitted model (REML and SV-WLS). Which model is associated with the smallest mean squared prediction error?
+
+(@) [3 pts] Create diagnostic plots to visually assess how reasonable the assumption of marginal normality is for each fitted model. Interpret your plots.
+
+(@) [3 pts] Report and interpret the REML-estimated fixed effects of date and whether or not a site is at TIA. Do the signs match what you'd expect? Why/why not?
+
+(@) [3 pts] Use the REML-fitted model to create a 95% confidence interval for the expected log-concentration of dioxane in groundwater beneath the intersection of Drexel Rd. and 6th Ave. (32.1485, -110.9680) on May 28, 2007.
+
+(@) [4 pts] Use a basis function approach to model the log-concentration of dioxane while accounting for the possible effects of date and whether or not a site is located at TIA. Use your fitted model to create another 95% confidence interval for the log-concentration of dioxane at Drexel Rd. and 6th Ave. on the same date. Which method produced the narrower confidence interval?
+
+## II. Canada Lynx [8 pts]
+
+(@) [4 pts] Obtain the centered and scaled locations of two Canada lynx from the supplementary materials of [**Buderman et al. (2016)**](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12465). Use the functionality of the `mgcv` package to fit independent GAM models to each coordinate of the bivariate location measurements of individual BC03F03. **Use cubic regression splines**, and experiment with the dimension of the basis (i.e., number of basis functions) to find a fit that looks good to you. **PEC**.
+
+(@) [4 pts] Make two plots in the spirit of Figure 1(b) from Buderman et al. (2016) using your fitted models. Where in the two plots do you see the biggest discrepancies between your fit and the one from Buderman et al. (2016)?
