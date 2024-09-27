@@ -11,7 +11,7 @@ header-includes:
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(fig.width = 12, fig.height = 8)
+knitr::opts_chunk$set(fig.width = 12, fig.height = 8, warning = F, message = F)
 ```
 
 ## I. Tucson Water
@@ -42,15 +42,6 @@ class(log.dioxane.data$AnalysisStartDate)
 # # checking date class again after conversion (POSIXlt)
 # class(log.dioxane.data$AnalysisStartDate)
 
-## Need to set coordinate system?
-
-## zone 12 lat/long
-dioxane_sf <- st_as_sf(log.dioxane.data, coords = c("LongitudeMeasure","LatitudeMeasure"), crs = 26912)
-#View(dioxane_sf)
-st_crs(dioxane_sf)
-
-
-
 # .Rds files to run
 #load("C:/Users/tsgil/OneDrive/Documents/VGS/StatsWithR/token.Rds")
 #ggmap::register_stadiamaps(paste0(Token), write=T)
@@ -59,19 +50,22 @@ bbox <- c(left = -111.0, bottom = 32.085, right = -110.93, top = 32.175)
 #log.dioxane.data$MonitoringLocationIdentifier
 the.map <- get_stadiamap(bbox = bbox, zoom = 14, scale = 2)
 
-
-# ggmap(the.map) + 
-#   geom_point(aes(x = LongitudeMeasure, y = LatitudeMeasure),
-#              data = data.frame(log.dioxane.data))
-
 ggmap(the.map) +
-  geom_point(aes(x = longitude_decimal, y = latitude_decimal, color = log(ResultMeasureValue)),
-             data = data.frame(dioxane_sf)) +
-  scale_color_gradient(low = "yellow", high = "red")+
-  
-  # Customize latitude labels
-  scale_y_continuous(labels = scales::number_format(accuracy = 0.01))
+  geom_point(aes(x = LongitudeMeasure, y = LatitudeMeasure, color = log(ResultMeasureValue)),
+             data = data.frame(log.dioxane.data)) +
+  scale_color_gradient(low = "yellow", high = "red")
 
+
+# ggplot() +
+# geom_sf(data = dioxane_sf) +
+# coord_sf(crs = st_crs(26912))
+
+# ggmap(the.map) +
+#   geom_point(aes(x = longitude_decimal, y = latitude_decimal, color = log(ResultMeasureValue)),
+#              data = data.frame(dioxane_sf)) +
+#   scale_color_gradient(low = "yellow", high = "red")+
+#   # Customize latitude labels
+#   scale_y_continuous(labels = scales::number_format(accuracy = 0.01))
 
 # # create the breaks- and label vectors
 # ewbrks <- seq(-10,10,5)
@@ -91,25 +85,176 @@ ggmap(the.map) +
 ```
 
 (@) [4 pts] Make a scatterplot showing log-dioxane as a function of the date each measurement was taken. Does your plot suggest time is related to concentrations of dioxane? Make a figure with two boxplots of log-dioxane grouped by whether or not sites are located at the airport or not. Does your figure suggest that sites at the airport have meaningfully different concentrations than other sites?
+```{r, lm.model}
 
-(@) [3 pts] Transform the dioxane data so that their new projection (coordinate reference system) corresponds to UTM zone 12N. **(PEC)**. Make an empirical semivariogram for the log-concentration of dioxane after accounting for possible linear effects of date and whether a site is at the airport or not. Give a rough estimate for the size of the nugget effect.
+# Fit a linear regression model "lm" for a scatter plot
+lm.model <- lm(log(log.dioxane.data$ResultMeasureValue) ~ log.dioxane.data$AnalysisStartDate)
+
+plot(log.dioxane.data$AnalysisStartDate, log(log.dioxane.data$ResultMeasureValue), main = "Log(ResultMeasureValue) over Time", xlab = "Date", ylab = "Log(ResultMeasureValue)", pch = 16, col = "orange") +
+  abline(lm.model, col = "lightblue", lwd = 3)
+
+```
+
+
+
+```{r, p.values}
+sum.lm.model<- summary(lm.model)
+sum.lm.model$coefficients
+```
+
+
+```{r, box.plots}
+## box plots...
+boxplot(log(log.dioxane.data$ResultMeasureValue) ~ log.dioxane.data$airport)
+```
+(@) [3 pts] Transform the dioxane data so that their new projection (coordinate reference system) corresponds to UTM zone 12N. **(PEC)**. Make an empirical semivariogram for the log-concentration of dioxane **after accounting for possible linear effects of date and whether a site is at the airport or not**. Give a rough estimate for the size of the nugget effect.
+```{r, transform.esv}
+## zone 12 lat/long
+dioxane_sf <- st_as_sf(log.dioxane.data, coords = c("LongitudeMeasure","LatitudeMeasure"), crs = 26912)
+cor.sys<- st_crs(dioxane_sf)
+cor.sys$wkt
+
+#plot(dioxane_sf$geometry)
+dioxane_sf$AnalysisStartDate
+#semivariogram
+library(spmodel)
+#sample range
+d.esv<- spmodel::esv(log(ResultMeasureValue) ~ 1, dioxane_sf)
+plot(d.esv)
+```
+
+```{r, esv.date}
+d.esv.date<- spmodel::esv(log(ResultMeasureValue) ~ AnalysisStartDate, dioxane_sf)
+plot(d.esv.date)
+```
+
+```{r, esv.airport}
+d.esv.airport<- spmodel::esv(log(ResultMeasureValue) ~ airport, dioxane_sf)
+plot(d.esv.airport)
+## Nugget estimate at 0.75
+```
 
 (@) [3 pts] Fit a spatial linear regression model using restricted maximum likelihood (REML) to log-concentrations of dioxane as a linear function of measurement date and whether a site is located at TIA. Use the Matérn parametric family of covariance functions. Report the estimated nugget, partial sill, and range parameters. Given your semivariogram from the previous problem, do the parameter estimates make sense to you?
+```{r, fit.reml}
+fit_exp1 <- splm(log(ResultMeasureValue) ~ 1, data = dioxane_sf, spcov_type = "exponential")
+summary(fit_exp1)
+
+fit_exp2 <- splm(log(ResultMeasureValue) ~ airport, dioxane_sf, spcov_type = "exponential")
+summary(fit_exp2)
+
+a.sum<- summary(fit_exp2)
+# Coefficients meaning/measurements
+#Sill = de
+#Nugget = ie
+#Range Parameters = range 
+a.sum$coefficients$spcov
+
+exp_cov <- function(d, ie, de, range){
+ie + de * (1 - exp(-d/range))
+}
+
+d_esv1 <- esv(log(ResultMeasureValue) ~ 1, dioxane_sf)
+
+distances <- seq(0, .05, l = 1e2)
+
+plot(d_esv1) +
+lines(distances, exp_cov(distances, fit_exp1$coefficients$spcov['ie'],
+fit_exp1$coefficients$spcov['de'],
+fit_exp1$coefficients$spcov['range']),
+lty = 2, lwd = 2, col = "red")
+
+d_esv2 <- esv(log(ResultMeasureValue) ~ airport, dioxane_sf)
+
+plot(d_esv2) +
+lines(distances, exp_cov(distances, fit_exp2$coefficients$spcov['ie'],
+fit_exp2$coefficients$spcov['de'],
+fit_exp2$coefficients$spcov['range']),
+lty = 2, lwd = 2, col = "blue")
+
+```
 
 (@) [3 pts] Fit the same spatial linear regression model to the observations using the two-stage semivariogram + weighted least squares (SV-WLS) approach. Report the estimated covariance function parameters. Which estimation method, REML or SV-WLS, do you think yields the most reasonable covariance function parameters?
+```{r, lm.wls}
+#dioxane_sf$ResultMeasureValue
+fit_exp1_sv_wls <- splm(log(ResultMeasureValue) ~ 1,
+data = dioxane_sf,
+spcov_type = "exponential",
+estmethod = "sv-wls")
+
+c(coef(fit_exp1), coef(fit_exp1_sv_wls))
+
+#reml
+coef(fit_exp1, type = "spcov")[1:3]
+#         de          ie       range 
+#1.690715035 0.186268930 0.002157489 
+
+
+#svwls
+coef(fit_exp1_sv_wls, type = "spcov")[1:3]
+#        de         ie      range 
+#1.68938084 0.50668026 0.02299638 
+```
 
 (@) [3 pts] Use leave-one-out cross validation to compare the predictive performance of each fitted model (REML and SV-WLS). Which model is associated with the smallest mean squared prediction error?
+```{r, loocv}
+rbind(loocv(fit_exp1),
+loocv(fit_exp1_sv_wls),
+loocv(fit_exp2))
+```
 
 (@) [3 pts] Create diagnostic plots to visually assess how reasonable the assumption of marginal normality is for each fitted model. Interpret your plots.
+```{r, diagn.plots}
+layout(matrix(1:6, 2, 3))
+plot(fit_exp2, which = c(1:3, 5, 7)); plot(esv(.std.resid ~ 1, augment(fit_exp2)))
+```
+
+
+
 
 (@) [3 pts] Report and interpret the REML-estimated fixed effects of date and whether or not a site is at TIA. Do the signs match what you'd expect? Why/why not?
+```{r, predict.maybe}
+dioxane_sf_temp<- dioxane_sf
+dioxane_sf_temp$prediction <- predict(fit_exp2, newdata = dioxane_sf_temp)
+View(dioxane_sf_temp)
+
+the.map <- get_stadiamap(bbox = bbox, zoom = 14, scale = 2)
+
+ggmap(the.map, extent = "device") +
+geom_sf(aes(col = prediction),
+size = 0.7, pch = 15,
+data = dioxane_sf_temp,
+inherit.aes = F) +
+geom_sf(size = 0.5, data = dioxane_sf,
+inherit.aes = F) +
+scale_color_distiller(palette = "YlOrRd",
+direction = 1,
+limits = c(4.1, 7.25))
+
+```
 
 (@) [3 pts] Use the REML-fitted model to create a 95% confidence interval for the expected log-concentration of dioxane in groundwater beneath the intersection of Drexel Rd. and 6th Ave. (32.1485, -110.9680) on May 28, 2007.
+```{r, a}
+
+```
 
 (@) [4 pts] Use a basis function approach to model the log-concentration of dioxane while accounting for the possible effects of date and whether or not a site is located at TIA. Use your fitted model to create another 95% confidence interval for the log-concentration of dioxane at Drexel Rd. and 6th Ave. on the same date. Which method produced the narrower confidence interval?
+```{r, b}
+
+```
 
 ## II. Canada Lynx [8 pts]
 
 (@) [4 pts] Obtain the centered and scaled locations of two Canada lynx from the supplementary materials of [**Buderman et al. (2016)**](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12465). Use the functionality of the `mgcv` package to fit independent GAM models to each coordinate of the bivariate location measurements of individual BC03F03. **Use cubic regression splines**, and experiment with the dimension of the basis (i.e., number of basis functions) to find a fit that looks good to you. **PEC**.
+```{r, 1}
+lynx_data <- read_csv("mee312465-sup-0007-appendixs7.csv")
+install.packages("Rtools")
+install.packages("mgvc")
+
+library(mgvc)
+
+```
 
 (@) [4 pts] Make two plots in the spirit of Figure 1(b) from Buderman et al. (2016) using your fitted models. Where in the two plots do you see the biggest discrepancies between your fit and the one from Buderman et al. (2016)?
+```{r, 2}
+
+```
